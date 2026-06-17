@@ -19,6 +19,17 @@ function getToken(): string | null {
   return localStorage.getItem('token')
 }
 
+class ApiError extends Error {
+  status: number
+  data: any
+  constructor(message: string, status: number, data?: any) {
+    super(message)
+    this.status = status
+    this.data = data
+    this.name = 'ApiError'
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -39,12 +50,12 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(body.error || `请求失败 (${res.status})`)
+    throw new ApiError(body.error || `请求失败 (${res.status})`, res.status, body.data)
   }
 
   const json = await res.json()
   if (!json.success) {
-    throw new Error(json.error || '请求失败')
+    throw new ApiError(json.error || '请求失败', res.status, json.data)
   }
   return json.data as T
 }
@@ -154,6 +165,11 @@ export const workorders = {
     return request<WorkOrder[]>(`/workorders${query ? `?${query}` : ''}`)
   },
 
+  get: (id: number) => request<WorkOrder>(`/workorders/${id}`),
+
+  getByDevice: (deviceType: string, deviceId: number) =>
+    request<WorkOrder[]>(`/workorders/by-device?type=${encodeURIComponent(deviceType)}&id=${deviceId}`),
+
   create: (data: Partial<WorkOrder>) =>
     request<{ id: number }>('/workorders', {
       method: 'POST',
@@ -162,6 +178,27 @@ export const workorders = {
 
   accept: (id: number) =>
     request<void>(`/workorders/${id}/accept`, { method: 'PUT' }),
+
+  addStep: (id: number, step: string) =>
+    request<void>(`/workorders/${id}/steps`, {
+      method: 'POST',
+      body: JSON.stringify({ step }),
+    }),
+
+  addPart: (id: number, partName: string, quantity: number) =>
+    request<void>(`/workorders/${id}/parts`, {
+      method: 'POST',
+      body: JSON.stringify({ partName, quantity }),
+    }),
+
+  submitComplete: (id: number) =>
+    request<void>(`/workorders/${id}/submit-complete`, { method: 'PUT' }),
+
+  review: (id: number, pass: boolean, comment?: string) =>
+    request<void>(`/workorders/${id}/review`, {
+      method: 'PUT',
+      body: JSON.stringify({ pass, comment }),
+    }),
 
   complete: (id: number, photos?: string[]) =>
     request<void>(`/workorders/${id}/complete`, {

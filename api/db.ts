@@ -143,8 +143,28 @@ async function createTables() {
     t.integer('assigned_to').references('id').inTable('users')
     t.datetime('created_at').defaultTo(db.fn.now())
     t.datetime('accepted_at')
+    t.datetime('submitted_at')
     t.datetime('completed_at')
     t.integer('escalated').notNullable().defaultTo(0)
+    t.integer('reviewer_id').references('id').inTable('users')
+    t.string('review_comment')
+    t.datetime('reviewed_at')
+  })
+
+  await db.schema.createTable('work_order_steps', (t) => {
+    t.increments('id').primary()
+    t.integer('work_order_id').notNullable().references('id').inTable('work_orders')
+    t.string('step').notNullable()
+    t.integer('created_by').references('id').inTable('users')
+    t.datetime('created_at').defaultTo(db.fn.now())
+  })
+
+  await db.schema.createTable('work_order_parts', (t) => {
+    t.increments('id').primary()
+    t.integer('work_order_id').notNullable().references('id').inTable('work_orders')
+    t.string('part_name').notNullable()
+    t.integer('quantity').notNullable().defaultTo(1)
+    t.datetime('created_at').defaultTo(db.fn.now())
   })
 
   await db.schema.createTable('repair_photos', (t) => {
@@ -332,6 +352,38 @@ export async function initDatabase() {
           t.float('used_before').notNullable().defaultTo(0)
           t.float('quota').notNullable().defaultTo(0)
           t.datetime('created_at').defaultTo(db.fn.now())
+        })
+      }
+    })
+    await db.schema.hasTable('work_order_steps').then(async (exists) => {
+      if (!exists) {
+        await db.schema.createTable('work_order_steps', (t) => {
+          t.increments('id').primary()
+          t.integer('work_order_id').notNullable().references('id').inTable('work_orders')
+          t.string('step').notNullable()
+          t.integer('created_by').references('id').inTable('users')
+          t.datetime('created_at').defaultTo(db.fn.now())
+        })
+      }
+    })
+    await db.schema.hasTable('work_order_parts').then(async (exists) => {
+      if (!exists) {
+        await db.schema.createTable('work_order_parts', (t) => {
+          t.increments('id').primary()
+          t.integer('work_order_id').notNullable().references('id').inTable('work_orders')
+          t.string('part_name').notNullable()
+          t.integer('quantity').notNullable().defaultTo(1)
+          t.datetime('created_at').defaultTo(db.fn.now())
+        })
+      }
+    })
+    await db.schema.hasColumn('work_orders', 'submitted_at').then(async (exists) => {
+      if (!exists) {
+        await db.schema.table('work_orders', (t) => {
+          t.datetime('submitted_at')
+          t.integer('reviewer_id').references('id').inTable('users')
+          t.string('review_comment')
+          t.datetime('reviewed_at')
         })
       }
     })

@@ -1,11 +1,23 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Droplets, Download, FileSpreadsheet, ShieldCheck } from 'lucide-react'
+import { Droplets, Download, FileSpreadsheet, ShieldCheck, X, Bell } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import { water as api } from '@/utils/api'
 import { useAuthStore } from '@/store/auth'
 import type { WaterUsage } from '@/types'
 
 type TabKey = 'usage' | 'quota' | 'approval'
+
+interface ApprovalRecord {
+  id: number
+  fieldId: number
+  fieldName: string
+  approverId: number
+  approverName: string
+  reason: string
+  usedBefore: number
+  quota: number
+  createdAt: string
+}
 
 function monthStr() {
   return new Date().toISOString().slice(0, 7)
@@ -21,6 +33,7 @@ export default function Water() {
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner'
   const isTech = user?.role === 'technician'
+  const isFarmer = user?.role === 'farmer'
   const canEdit = isOwner || isTech
 
   const [month, setMonth] = useState(monthStr())
@@ -31,29 +44,53 @@ export default function Water() {
   const [editQuota, setEditQuota] = useState(0)
   const [approvalField, setApprovalField] = useState<WaterUsage | null>(null)
   const [approvalReason, setApprovalReason] = useState('')
-  const [approvalHistory, setApprovalHistory] = useState<{
-    id: number; fieldId: number; fieldName: string;
-    approverId: number; approverName: string; reason: string;
-    usedBefore: number; quota: number; createdAt: string;
-  }[]>([])
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([])
+
+  const [restoreNotification, setRestoreNotification] = useState<ApprovalRecord | null>(null)
+  const [dismissedIds, setDismissedIds] = useState<number[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       const [d, history] = await Promise.all([
         api.getUsage({ month }),
-        canEdit ? api.approvalHistory().catch(() => []) : Promise.resolve([]),
+        api.approvalHistory().catch(() => []),
       ])
       setData(d)
       setApprovalHistory(history || [])
+
+      if (isFarmer && history && history.length > 0) {
+        const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000
+        const recentApprovals = (history as ApprovalRecord[]).filter((h) => {
+          const createdAt = new Date(h.createdAt).getTime()
+          return createdAt > twentyFourHoursAgo
+        })
+        if (recentApprovals.length > 0) {
+          const stored = localStorage.getItem('water_dismissed_approvals')
+          const dismissed = stored ? JSON.parse(stored) : []
+          setDismissedIds(dismissed)
+          const unread = recentApprovals.find((h) => !dismissed.includes(h.id))
+          if (unread) {
+            setRestoreNotification(unread)
+          }
+        }
+      }
     } catch {
       setData([])
+      setApprovalHistory([])
     } finally {
       setLoading(false)
     }
-  }, [month, canEdit])
+  }, [month, isFarmer])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  const dismissNotification = (record: ApprovalRecord) => {
+    const newDismissed = [...dismissedIds, record.id]
+    setDismissedIds(newDismissed)
+    localStorage.setItem('water_dismissed_approvals', JSON.stringify(newDismissed))
+    setRestoreNotification(null)
+  }
 
   const totalUsed = data.reduce((s, d) => s + d.monthlyUsed, 0)
   const totalQuota = data.reduce((s, d) => s + d.monthlyQuota, 0)
@@ -130,6 +167,29 @@ export default function Water() {
 
   return (
     <div className="p-6 space-y-6">
+      {restoreNotification && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+          <Bell className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium text-emerald-800 mb-1">灌溉权限已恢复</div>
+            <div className="text-sm text-emerald-700">
+              <span className="font-medium">「{restoreNotification.fieldName}」</span> 的灌溉权限已恢复
+            </div>
+            <div className="text-xs text-emerald-600 mt-1 space-x-4">
+              <span>审批人：{restoreNotification.approverName}</span>
+              <span>恢复原因：{restoreNotification.reason}</span>
+              <span>{new Date(restoreNotification.createdAt).toLocaleString('zh-CN')}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => dismissNotification(restoreNotification)}
+            className="text-emerald-500 hover:text-emerald-700 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Droplets className="w-6 h-6 text-primary" />

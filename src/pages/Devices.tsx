@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Monitor, Droplets, Thermometer, Gauge, Waves,
   ToggleLeft, ToggleRight, AlertTriangle, AlertCircle,
   ArrowUp, ArrowDown, Minus, ClipboardList, RefreshCw,
-  X, Wrench,
+  X, Wrench, ListTodo, Package, Send, ThumbsUp, ThumbsDown, UserCheck,
+  ImagePlus, Clock, CheckCircle2, ArrowUpCircle,
 } from 'lucide-react'
 import { devices as deviceApi, fields as fieldApi, workorders as orderApi } from '@/utils/api'
 import { useAuthStore } from '@/store/auth'
-import type { Sensor, Valve, Pump, Field, Urgency } from '@/types'
+import type { Sensor, Valve, Pump, Field, Urgency, WorkOrder, WorkOrderStep, WorkOrderPart } from '@/types'
 
 type Tab = 'sensors' | 'valves' | 'pumps' | 'alerts'
 type StatusFilter = '' | 'normal' | 'fault' | 'offline'
@@ -21,6 +23,7 @@ interface AlertItem {
   description: string
   severity: 'high' | 'medium' | 'low'
   time: string
+  relatedOrder?: WorkOrder | null
 }
 
 const SENSOR_TYPE_LABELS: Record<string, string> = {
@@ -36,6 +39,18 @@ const SEVERITY_STYLES: Record<string, string> = {
   low: 'bg-yellow-50 text-yellow-600 border-yellow-100',
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: '待接单',
+  accepted: '已接单',
+  in_progress: '进行中',
+  submitted: '待复核',
+  completed: '已完成',
+}
+
+const URGENCY_LABELS: Record<Urgency, string> = {
+  high: '紧急', medium: '中等', low: '低',
+}
+
 function TrendArrow({ current, prev }: { current: number; prev: number }) {
   if (current > prev) return <ArrowUp className="w-3.5 h-3.5 text-red-400" />
   if (current < prev) return <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
@@ -46,6 +61,11 @@ function StatusBadge({ status }: { status: string }) {
   if (status === 'normal' || status === 'running') return <span className="status-normal">正常</span>
   if (status === 'fault') return <span className="status-fault">故障</span>
   return <span className="status-offline">离线</span>
+}
+
+function OrderStatusBadge({ status }: { status: string }) {
+  const color = status === 'completed' ? 'badge-green' : status === 'submitted' ? 'badge-purple' : status === 'pending' ? 'badge-orange' : 'badge-blue'
+  return <span className={color}>{STATUS_LABELS[status] || status}</span>
 }
 
 function ConfirmDialog({ open, onConfirm, onCancel, message }: {
@@ -64,6 +84,16 @@ function ConfirmDialog({ open, onConfirm, onCancel, message }: {
           <button className="btn-secondary" onClick={onCancel}>取消</button>
           <button className="btn-primary" onClick={onConfirm}>确认</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 z-40 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {children}
       </div>
     </div>
   )
@@ -208,7 +238,9 @@ function PumpDashboard({ pumps, fieldMap, onRepair }: {
   )
 }
 
-function AlertList({ alerts, onGenerateOrder }: { alerts: AlertItem[]; onGenerateOrder: (a: AlertItem) => void }) {
+function AlertList({ alerts, onGenerateOrder, onViewOrder }: {
+  alerts: AlertItem[]; onGenerateOrder: (a: AlertItem) => void; onViewOrder: (o: WorkOrder) => void
+}) {
   return (
     <div className="space-y-3">
       {alerts.map((a) => (
@@ -216,21 +248,39 @@ function AlertList({ alerts, onGenerateOrder }: { alerts: AlertItem[]; onGenerat
           <div className="flex items-start justify-between">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
-              <div>
-                <div className="flex items-center gap-2 mb-1">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="font-medium">{a.deviceName}</span>
                   <span className="text-xs opacity-70">{a.fieldName}</span>
+                  {a.relatedOrder && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onViewOrder(a.relatedOrder!) }}
+                      className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/70 hover:bg-white transition-colors"
+                    >
+                      <ClipboardList className="w-3 h-3" />
+                      工单: <OrderStatusBadge status={a.relatedOrder.status} />
+                    </button>
+                  )}
                 </div>
                 <p className="text-sm opacity-80">{a.description}</p>
                 <p className="text-xs opacity-50 mt-1">{new Date(a.time).toLocaleString('zh-CN')}</p>
               </div>
             </div>
-            <button
-              className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/60 hover:bg-white/80 transition-colors"
-              onClick={() => onGenerateOrder(a)}
-            >
-              <ClipboardList className="w-3.5 h-3.5" />生成工单
-            </button>
+            {!a.relatedOrder ? (
+              <button
+                className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/60 hover:bg-white/80 transition-colors"
+                onClick={() => onGenerateOrder(a)}
+              >
+                <ClipboardList className="w-3.5 h-3.5" />生成工单
+              </button>
+            ) : (
+              <button
+                className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
+                onClick={(e) => { e.stopPropagation(); onViewOrder(a.relatedOrder!) }}
+              >
+                <ClipboardList className="w-3.5 h-3.5" />查看工单
+              </button>
+            )}
           </div>
         </div>
       ))}
@@ -239,8 +289,117 @@ function AlertList({ alerts, onGenerateOrder }: { alerts: AlertItem[]; onGenerat
   )
 }
 
+function DetailModal({
+  order, fieldName, onClose, onOpenWorkOrders,
+}: {
+  order: WorkOrder; fieldName: string; onClose: () => void; onOpenWorkOrders: () => void
+}) {
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-lg font-bold">工单详情 #{order.id}</h3>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      <div className="space-y-3 text-sm">
+        <div className="flex justify-between"><span className="text-gray-500">状态</span>
+          <span className={order.status === 'completed' ? 'badge-green' : order.status === 'submitted' ? 'badge-purple' : order.status === 'pending' ? 'badge-orange' : 'badge-blue'}>
+            {STATUS_LABELS[order.status]}
+          </span></div>
+        <div className="flex justify-between"><span className="text-gray-500">紧急程度</span>
+          <span className={order.urgency === 'high' ? 'badge-red' : order.urgency === 'medium' ? 'badge-orange' : 'badge-green'}>
+            {URGENCY_LABELS[order.urgency]}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">设备</span><span>{order.deviceType} - #{order.deviceId}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">田块</span><span>{fieldName}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">负责人</span><span>{order.assigneeName}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">创建时间</span><span>{new Date(order.createdAt).toLocaleString()}</span></div>
+        {order.acceptedAt && <div className="flex justify-between"><span className="text-gray-500">接单时间</span><span>{new Date(order.acceptedAt).toLocaleString()}</span></div>}
+        {order.submittedAt && <div className="flex justify-between"><span className="text-gray-500">提交复核</span><span>{new Date(order.submittedAt).toLocaleString()}</span></div>}
+        {order.completedAt && <div className="flex justify-between"><span className="text-gray-500">完成时间</span><span>{new Date(order.completedAt).toLocaleString()}</span></div>}
+        {order.reviewComment && (
+          <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs">
+            <div className="font-medium text-amber-800 mb-0.5">复核意见</div>
+            <div className="text-amber-700">{order.reviewComment}</div>
+          </div>
+        )}
+        {order.escalated && <div className="flex justify-between"><span className="text-gray-500">升级</span><span className="badge-red">已升级</span></div>}
+        <div><span className="text-gray-500">描述</span><p className="mt-1 text-gray-700">{order.description}</p></div>
+
+        <div className="border-t pt-3">
+          <div className="flex items-center gap-2 mb-2 font-semibold text-gray-700">
+            <ListTodo className="w-4 h-4 text-primary" />处理步骤
+          </div>
+          {order.steps && order.steps.length > 0 ? (
+            <ol className="space-y-2 text-xs mb-2">
+              {order.steps.map((s: WorkOrderStep, i: number) => (
+                <li key={s.id} className="flex gap-2">
+                  <span className="text-primary font-bold">{i + 1}.</span>
+                  <div className="flex-1">
+                    <p className="text-gray-700">{s.step}</p>
+                    <p className="text-gray-400 mt-0.5">{new Date(s.createdAt).toLocaleString()}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-xs text-gray-400 mb-2">暂无处理步骤</p>
+          )}
+        </div>
+
+        <div className="border-t pt-3">
+          <div className="flex items-center gap-2 mb-2 font-semibold text-gray-700">
+            <Package className="w-4 h-4 text-primary" />更换配件
+          </div>
+          {order.parts && order.parts.length > 0 ? (
+            <div className="space-y-1 text-xs mb-2">
+              {order.parts.map((p: WorkOrderPart) => (
+                <div key={p.id} className="flex justify-between bg-gray-50 rounded px-2 py-1.5">
+                  <span className="text-gray-700">{p.partName}</span>
+                  <span className="text-gray-500">× {p.quantity}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 mb-2">暂无更换配件</p>
+          )}
+        </div>
+
+        {order.photos.length > 0 && (
+          <div className="border-t pt-3">
+            <p className="text-gray-700 mb-2 text-sm font-semibold">维修照片</p>
+            <div className="flex gap-2 flex-wrap">
+              {order.photos.map((p, i) => <img key={i} src={p} alt="" className="w-20 h-20 rounded object-cover border" />)}
+            </div>
+          </div>
+        )}
+
+        <div className="border-t pt-3">
+          <p className="text-gray-500 mb-2 text-sm font-semibold">状态时间线</p>
+          <div className="space-y-1 text-xs text-gray-600">
+            <div>📌 创建 - {new Date(order.createdAt).toLocaleString()}</div>
+            {order.acceptedAt && <div>✅ 接单 - {new Date(order.acceptedAt).toLocaleString()}</div>}
+            {order.submittedAt && <div>📤 提交复核 - {new Date(order.submittedAt).toLocaleString()}</div>}
+            {order.reviewedAt && <div>
+              {order.status === 'completed' ? '✅' : '🔄'} 复核{order.status === 'completed' ? '通过' : '驳回'} - {new Date(order.reviewedAt).toLocaleString()}
+            </div>}
+            {order.completedAt && <div>🏁 完成 - {new Date(order.completedAt).toLocaleString()}</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t pt-4 mt-4 flex justify-end">
+        <button onClick={onOpenWorkOrders} className="btn-primary gap-1">
+          <ClipboardList className="w-4 h-4" /> 前往工单管理处理
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function Devices() {
   const user = useAuthStore((s) => s.user)
+  const navigate = useNavigate()
   const [sensors, setSensors] = useState<Sensor[]>([])
   const [valves, setValves] = useState<Valve[]>([])
   const [pumps, setPumps] = useState<Pump[]>([])
@@ -250,6 +409,7 @@ export default function Devices() {
   const [tab, setTab] = useState<Tab>('sensors')
   const [toast, setToast] = useState('')
   const [confirmValve, setConfirmValve] = useState<Valve | null>(null)
+  const [showDetail, setShowDetail] = useState<WorkOrder | null>(null)
   const refreshRef = useRef<ReturnType<typeof setInterval>>()
 
   const [orderForm, setOrderForm] = useState<{
@@ -257,11 +417,28 @@ export default function Devices() {
     fieldId: number; description: string; urgency: Urgency;
   }>({ open: false, deviceType: '', deviceId: '', deviceName: '', fieldId: 0, description: '', urgency: 'high' })
 
+  const [alerts, setAlerts] = useState<AlertItem[]>([])
+
   const canManage = user?.role === 'technician' || user?.role === 'owner'
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 2500)
+  }, [])
+
+  const loadRelatedOrders = useCallback(async (alertList: AlertItem[]) => {
+    const alertsWithOrders = await Promise.all(
+      alertList.map(async (a) => {
+        try {
+          const orders = await orderApi.getByDevice(a.deviceType, Number(a.id))
+          if (orders && orders.length > 0) {
+            return { ...a, relatedOrder: orders[0] }
+          }
+        } catch { /* ignore */ }
+        return { ...a, relatedOrder: null }
+      })
+    )
+    setAlerts(alertsWithOrders)
   }, [])
 
   const fetchData = useCallback(async () => {
@@ -279,35 +456,37 @@ export default function Devices() {
       const map: Record<number, string> = {}
       f.forEach((field) => { map[field.id] = field.name })
       setFieldMap(map)
+
+      const alertList: AlertItem[] = [
+        ...s.filter((s) => s.status === 'fault').map((s, i) => ({
+          id: 1000 + i, deviceType: '传感器', deviceName: SENSOR_TYPE_LABELS[s.type] || s.type,
+          fieldId: s.fieldId, fieldName: map[s.fieldId] || `田块#${s.fieldId}`,
+          description: `传感器异常，当前值 ${s.value}${s.unit}`, severity: 'high' as const, time: s.lastUpdate,
+        })),
+        ...pumps.filter((p) => p.status === 'fault').map((p, i) => ({
+          id: 2000 + i, deviceType: '水泵', deviceName: p.name,
+          fieldId: p.fieldId, fieldName: map[p.fieldId] || `田块#${p.fieldId}`,
+          description: `水泵故障，需要维修`, severity: 'high' as const, time: new Date().toISOString(),
+        })),
+      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+
+      loadRelatedOrders(alertList)
     } catch {
       showToast('加载数据失败')
     } finally {
       setLoading(false)
     }
-  }, [showToast])
+  }, [showToast, loadRelatedOrders])
 
   useEffect(() => {
     fetchData()
-    refreshRef.current = setInterval(fetchData, 5000)
+    refreshRef.current = setInterval(fetchData, 10000)
     return () => { if (refreshRef.current) clearInterval(refreshRef.current) }
   }, [fetchData])
 
   const faultCount = sensors.filter((s) => s.status === 'fault').length
     + valves.filter((v) => (v as { status: string }).status === 'fault').length
     + pumps.filter((p) => p.status === 'fault').length
-
-  const alerts: AlertItem[] = [
-    ...sensors.filter((s) => s.status === 'fault').map((s, i) => ({
-      id: 1000 + i, deviceType: '传感器', deviceName: SENSOR_TYPE_LABELS[s.type] || s.type,
-      fieldId: s.fieldId, fieldName: fieldMap[s.fieldId] || `田块#${s.fieldId}`,
-      description: `传感器异常，当前值 ${s.value}${s.unit}`, severity: 'high' as const, time: s.lastUpdate,
-    })),
-    ...pumps.filter((p) => p.status === 'fault').map((p, i) => ({
-      id: 2000 + i, deviceType: '水泵', deviceName: p.name,
-      fieldId: p.fieldId, fieldName: fieldMap[p.fieldId] || `田块#${p.fieldId}`,
-      description: `水泵故障，需要维修`, severity: 'high' as const, time: new Date().toISOString(),
-    })),
-  ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
 
   const handleToggleValve = async () => {
     if (!confirmValve) return
@@ -338,6 +517,15 @@ export default function Devices() {
     })
   }
 
+  const handleViewOrder = async (order: WorkOrder) => {
+    try {
+      const detail = await orderApi.get(order.id)
+      setShowDetail(detail)
+    } catch (e: any) {
+      showToast(e?.message || '加载工单详情失败')
+    }
+  }
+
   const handleSubmitOrder = async () => {
     if (!orderForm.fieldId || !orderForm.description) {
       showToast('请填写完整工单信息')
@@ -354,7 +542,20 @@ export default function Devices() {
       })
       showToast('工单已创建，将指派维修人员处理')
       setOrderForm({ open: false, deviceType: '', deviceId: '', deviceName: '', fieldId: 0, description: '', urgency: 'high' })
+      fetchData()
     } catch (e: any) {
+      if (e?.status === 409 && e?.data?.existingId) {
+        if (confirm('该设备已有进行中的工单，是否直接跳转到该工单详情？')) {
+          try {
+            const existing = await orderApi.get(e.data.existingId)
+            setOrderForm({ open: false, deviceType: '', deviceId: '', deviceName: '', fieldId: 0, description: '', urgency: 'high' })
+            setShowDetail(existing)
+          } catch {
+            showToast('查找现有工单失败')
+          }
+          return
+        }
+      }
       showToast(e?.message || '创建工单失败')
     }
   }
@@ -423,7 +624,7 @@ export default function Devices() {
       {tab === 'sensors' && <SensorTable sensors={sensors} fieldMap={fieldMap} />}
       {tab === 'valves' && <ValveGrid valves={valves} fieldMap={fieldMap} onToggle={(v) => setConfirmValve(v)} />}
       {tab === 'pumps' && <PumpDashboard pumps={pumps} fieldMap={fieldMap} onRepair={openOrderFromPump} />}
-      {tab === 'alerts' && <AlertList alerts={alerts} onGenerateOrder={openOrderFromAlert} />}
+      {tab === 'alerts' && <AlertList alerts={alerts} onGenerateOrder={openOrderFromAlert} onViewOrder={handleViewOrder} />}
 
       <ConfirmDialog
         open={!!confirmValve}
@@ -454,11 +655,7 @@ export default function Devices() {
               </div>
               <div>
                 <label className="form-label">所属田块</label>
-                <select className="form-input" value={orderForm.fieldId}
-                  onChange={(e) => setOrderForm((s) => ({ ...s, fieldId: Number(e.target.value) }))}>
-                  <option value={0}>选择田块</option>
-                  {fields.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                </select>
+                <input className="form-input bg-gray-50" value={fieldMap[orderForm.fieldId] || `田块#${orderForm.fieldId}`} readOnly />
               </div>
               <div>
                 <label className="form-label">故障描述</label>
@@ -484,6 +681,13 @@ export default function Devices() {
           </div>
         </div>
       )}
+
+      {showDetail && <DetailModal
+        order={showDetail}
+        fieldName={fieldMap[showDetail.fieldId] || `田块#${showDetail.fieldId}`}
+        onOpenWorkOrders={() => navigate('/workorders')}
+        onClose={() => setShowDetail(null)}
+      />}
     </div>
   )
 }

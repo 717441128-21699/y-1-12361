@@ -3,7 +3,21 @@ export type DeviceStatus = 'normal' | 'fault' | 'offline'
 export type ValveStatus = 'open' | 'closed'
 export type PumpStatus = 'running' | 'stopped' | 'fault'
 export type PlanStatus = 'pending' | 'running' | 'completed' | 'cancelled'
-export type WorkOrderStatus = 'pending' | 'accepted' | 'in_progress' | 'completed'
+export type WorkOrderStatus = 'pending' | 'accepted' | 'in_progress' | 'submitted' | 'completed'
+
+export interface WorkOrderStep {
+  id: number
+  step: string
+  createdAt: string
+  createdBy: number
+}
+
+export interface WorkOrderPart {
+  id: number
+  partName: string
+  quantity: number
+  createdAt: string
+}
 export type Urgency = 'low' | 'medium' | 'high'
 
 export interface User {
@@ -90,6 +104,7 @@ export interface WorkOrder {
   deviceId: number
   deviceType: string
   fieldId: number
+  fieldName: string
   description: string
   urgency: Urgency
   status: WorkOrderStatus
@@ -97,8 +112,15 @@ export interface WorkOrder {
   assigneeName: string
   createdAt: string
   acceptedAt?: string
+  submittedAt?: string
+  completedAt?: string
   escalated: boolean
   photos: string[]
+  steps?: WorkOrderStep[]
+  parts?: WorkOrderPart[]
+  reviewerId?: number
+  reviewComment?: string
+  reviewedAt?: string
 }
 
 export interface WaterUsage {
