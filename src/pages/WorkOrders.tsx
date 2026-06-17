@@ -52,9 +52,9 @@ export default function WorkOrders() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [showCreate, setShowCreate] = useState(false)
   const [showDetail, setShowDetail] = useState<WorkOrder | null>(null)
-  const [showComplete, setShowComplete] = useState<WorkOrder | null>(null)
+  const [showUploadPhotos, setShowUploadPhotos] = useState<WorkOrder | null>(null)
   const [photoUrl, setPhotoUrl] = useState('')
-  const [completePhotos, setCompletePhotos] = useState<string[]>([])
+  const [pendingPhotos, setPendingPhotos] = useState<string[]>([])
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [toast, setToast] = useState('')
   const [newStep, setNewStep] = useState('')
@@ -154,30 +154,38 @@ export default function WorkOrders() {
     }
   }
 
-  const handleComplete = async () => {
-    if (!showComplete) return
-    if (completePhotos.length === 0) {
-      showToast('请至少上传一张配件更换照片后才能完成工单')
+  const handleUploadPhotos = async () => {
+    if (!showUploadPhotos) return
+    if (pendingPhotos.length === 0) {
+      showToast('请至少添加一张照片')
       return
     }
     try {
-      await workorders.complete(showComplete.id, completePhotos)
-      setShowComplete(null)
-      setCompletePhotos([])
+      await workorders.uploadPhotos(showUploadPhotos.id, pendingPhotos)
+      showToast('照片已保存')
+      setShowUploadPhotos(null)
+      setPendingPhotos([])
       setPhotoUrl('')
       fetchOrders()
+      if (showDetail?.id === showUploadPhotos.id) refreshDetail(showUploadPhotos.id)
     } catch (e: any) {
-      showToast(e?.message || '操作失败')
+      showToast(e?.message || '上传失败')
     }
   }
 
-  const handleSubmitReview = async () => {
-    if (!showDetail) return
+  const handleSubmitReview = async (orderId?: number) => {
+    const id = orderId || showDetail?.id
+    if (!id) return
+    const order = orders.find((o) => o.id === id)
+    if (order && (!order.photos || order.photos.length === 0)) {
+      showToast('请至少上传一张维修配件更换照片后再提交复核')
+      return
+    }
     try {
       setSubmitting(true)
-      await workorders.submitComplete(showDetail.id)
+      await workorders.submitComplete(id)
       await fetchOrders()
-      await refreshDetail(showDetail.id)
+      if (showDetail?.id === id) await refreshDetail(id)
       showToast('已提交复核，等待主管确认')
     } catch (e: any) {
       showToast(e?.message || '提交失败')
@@ -223,16 +231,28 @@ export default function WorkOrders() {
     } catch (e: any) {
       if (e?.status === 409 && e?.data?.existingId) {
         if (confirm('该设备已有进行中的工单，是否直接跳转到该工单详情？')) {
-          const existing = orders.find((o) => o.id === e.data.existingId)
-          if (existing) setShowDetail(existing)
+          try {
+            const existing = await workorders.get(e.data.existingId)
+            setShowCreate(false)
+            setShowDetail(existing)
+          } catch {
+            showToast('查找现有工单失败')
+          }
+          return
         }
-      } else {
-        showToast(e?.message || '创建失败')
       }
+      showToast(e?.message || '创建失败')
     }
   }
 
   const fieldName = (id: number) => allFields.find((f) => f.id === id)?.name ?? `田块#${id}`
+
+  const openUploadPhotos = (order: WorkOrder) => {
+    setShowDetail(null)
+    setShowUploadPhotos(order)
+    setPendingPhotos([])
+    setPhotoUrl('')
+  }
 
   if (loading) {
     return (
@@ -328,13 +348,19 @@ export default function WorkOrders() {
               <p className="text-xs text-gray-500 mt-1 line-clamp-2">{o.description}</p>
               <p className="text-xs text-gray-400 mt-1">接单: {o.acceptedAt ? relativeTime(o.acceptedAt) : '-'}</p>
               <p className="text-xs text-gray-500">负责人: {o.assigneeName}</p>
+              {o.photos.length > 0 && (
+                <div className="flex items-center gap-1 mt-1">
+                  <ImagePlus className="w-3 h-3 text-gray-400" />
+                  <span className="text-xs text-gray-400">{o.photos.length}张照片</span>
+                </div>
+              )}
               {user?.id === o.assignedTo && (
                 <div className="flex gap-2 mt-2">
-                  <button onClick={(e) => { e.stopPropagation(); setShowComplete(o); setCompletePhotos([]) }}
+                  <button onClick={(e) => { e.stopPropagation(); openUploadPhotos(o) }}
                     className="btn-secondary text-xs py-1 px-2 flex items-center gap-1">
-                    <ImagePlus className="w-3 h-3" /> 传照片
+                    <ImagePlus className="w-3 h-3" /> 上传照片
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); handleSubmitReview() }} disabled={submitting}
+                  <button onClick={(e) => { e.stopPropagation(); handleSubmitReview(o.id) }} disabled={submitting}
                     className="btn-primary text-xs py-1 px-2 flex items-center gap-1">
                     <Send className="w-3 h-3" /> 提交复核
                   </button>
@@ -357,7 +383,7 @@ export default function WorkOrders() {
               <p className="text-xs text-gray-500">负责人: {o.assigneeName}</p>
               {o.photos.length > 0 && (
                 <div className="flex gap-1 mt-2">
-                  {o.photos.map((p, i) => (
+                  {o.photos.slice(0, 3).map((p, i) => (
                     <img key={i} src={p} alt="" className="w-10 h-10 rounded object-cover border border-gray-200"
                       onClick={(e) => { e.stopPropagation(); setLightbox(p) }} />
                   ))}
@@ -382,7 +408,7 @@ export default function WorkOrders() {
               <p className="text-xs text-gray-400 mt-1">完成于 {o.completedAt ? relativeTime(o.completedAt) : '-'}</p>
               {o.photos.length > 0 && (
                 <div className="flex gap-1 mt-2">
-                  {o.photos.map((p, i) => (
+                  {o.photos.slice(0, 3).map((p, i) => (
                     <img key={i} src={p} alt="" className="w-10 h-10 rounded object-cover border border-gray-200 cursor-pointer"
                       onClick={(e) => { e.stopPropagation(); setLightbox(p) }} />
                   ))}
@@ -411,31 +437,30 @@ export default function WorkOrders() {
         submitting={submitting}
         onAddStep={handleAddStep}
         onAddPart={handleAddPart}
-        onSubmitReview={handleSubmitReview}
+        onSubmitReview={() => handleSubmitReview()}
         onReview={handleReview}
         onAccept={() => handleAccept(showDetail.id)}
         onEscalate={() => handleEscalate(showDetail.id)}
-        onUploadPhotos={() => { setShowDetail(null); setShowComplete(showDetail); setCompletePhotos([...(showDetail.photos || [])]) }}
-        onOpenWorkOrders={() => navigate('/workorders')}
+        onUploadPhotos={() => openUploadPhotos(showDetail)}
         onClose={() => setShowDetail(null)}
       />}
 
-      {showComplete && (
-        <Modal onClose={() => setShowComplete(null)}>
+      {showUploadPhotos && (
+        <Modal onClose={() => setShowUploadPhotos(null)}>
           <h3 className="text-lg font-bold mb-3">上传维修照片</h3>
-          <p className="text-xs text-gray-500 mb-3">上传至少一张配件更换照片后才能提交复核。可上传多张。</p>
+          <p className="text-xs text-gray-500 mb-3">照片作为补充材料保存，工单仍保持在「进行中」。提交复核时必须至少有一张照片。</p>
           <div className="flex gap-2 mb-3">
             <input value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)}
               placeholder="输入照片URL" className="form-input flex-1" />
-            <button onClick={() => { if (photoUrl) { setCompletePhotos([...completePhotos, photoUrl]); setPhotoUrl('') } }}
+            <button onClick={() => { if (photoUrl) { setPendingPhotos([...pendingPhotos, photoUrl]); setPhotoUrl('') } }}
               className="btn-secondary gap-1"><ImagePlus className="w-4 h-4" /> 添加</button>
           </div>
-          {completePhotos.length > 0 && (
+          {pendingPhotos.length > 0 && (
             <div className="flex gap-2 flex-wrap mb-3">
-              {completePhotos.map((p, i) => (
+              {pendingPhotos.map((p, i) => (
                 <div key={i} className="relative">
                   <img src={p} alt="" className="w-16 h-16 rounded object-cover border" />
-                  <button onClick={() => setCompletePhotos(completePhotos.filter((_, j) => j !== i))}
+                  <button onClick={() => setPendingPhotos(pendingPhotos.filter((_, j) => j !== i))}
                     className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">
                     <X className="w-3 h-3" /></button>
                 </div>
@@ -443,8 +468,8 @@ export default function WorkOrders() {
             </div>
           )}
           <div className="flex justify-end gap-2">
-            <button onClick={() => setShowComplete(null)} className="btn-secondary">取消</button>
-            <button onClick={handleComplete} className="btn-primary">保存照片</button>
+            <button onClick={() => setShowUploadPhotos(null)} className="btn-secondary">取消</button>
+            <button onClick={handleUploadPhotos} disabled={pendingPhotos.length === 0} className="btn-primary disabled:opacity-50">保存照片</button>
           </div>
         </Modal>
       )}
@@ -530,7 +555,7 @@ function CreateModal({ form, setForm, fields, onSubmit, onClose }: {
 function DetailModal({
   order, fieldName, canManage, canReview, isAssigned,
   newStep, setNewStep, newPart, setNewPart, reviewComment, setReviewComment, submitting,
-  onAddStep, onAddPart, onSubmitReview, onReview, onAccept, onEscalate, onUploadPhotos, onOpenWorkOrders, onClose,
+  onAddStep, onAddPart, onSubmitReview, onReview, onAccept, onEscalate, onUploadPhotos, onClose,
 }: {
   order: WorkOrder; fieldName: string; canManage: boolean; canReview: boolean; isAssigned: boolean
   newStep: string; setNewStep: (v: string) => void
@@ -539,8 +564,10 @@ function DetailModal({
   submitting: boolean
   onAddStep: () => void; onAddPart: () => void; onSubmitReview: () => void
   onReview: (pass: boolean) => void; onAccept: () => void; onEscalate: () => void
-  onUploadPhotos: () => void; onOpenWorkOrders: () => void; onClose: () => void
+  onUploadPhotos: () => void; onClose: () => void
 }) {
+  const noPhotos = !order.photos || order.photos.length === 0
+
   return (
     <Modal onClose={onClose}>
       <div className="flex items-center justify-between mb-3">
@@ -573,7 +600,6 @@ function DetailModal({
         {order.escalated && <div className="flex justify-between"><span className="text-gray-500">升级</span><span className="badge-red">已升级</span></div>}
         <div><span className="text-gray-500">描述</span><p className="mt-1 text-gray-700">{order.description}</p></div>
 
-        {/* 处理步骤 */}
         <div className="border-t pt-3">
           <div className="flex items-center gap-2 mb-2 font-semibold text-gray-700">
             <ListTodo className="w-4 h-4 text-primary" />处理步骤
@@ -603,7 +629,6 @@ function DetailModal({
           )}
         </div>
 
-        {/* 配件更换 */}
         <div className="border-t pt-3">
           <div className="flex items-center gap-2 mb-2 font-semibold text-gray-700">
             <Package className="w-4 h-4 text-primary" />更换配件
@@ -632,17 +657,22 @@ function DetailModal({
           )}
         </div>
 
-        {/* 维修照片 */}
-        {order.photos.length > 0 && (
-          <div className="border-t pt-3">
-            <p className="text-gray-700 mb-2 text-sm font-semibold">维修照片</p>
+        <div className="border-t pt-3">
+          <div className="flex items-center gap-2 mb-2 font-semibold text-gray-700">
+            <ImagePlus className="w-4 h-4 text-primary" />维修照片
+            {noPhotos && order.status === 'in_progress' && (
+              <span className="text-xs text-red-500 font-normal">（未上传，提交复核前需补传）</span>
+            )}
+          </div>
+          {order.photos.length > 0 ? (
             <div className="flex gap-2 flex-wrap">
               {order.photos.map((p, i) => <img key={i} src={p} alt="" className="w-20 h-20 rounded object-cover border" />)}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-xs text-gray-400">暂无照片</p>
+          )}
+        </div>
 
-        {/* 状态时间线 */}
         <div className="border-t pt-3">
           <p className="text-gray-500 mb-2 text-sm font-semibold">状态时间线</p>
           <div className="space-y-1 text-xs text-gray-600">
@@ -657,7 +687,6 @@ function DetailModal({
         </div>
       </div>
 
-      {/* 操作按钮区 */}
       <div className="border-t pt-4 mt-4 flex flex-wrap gap-2">
         {isAssigned && order.status === 'pending' && <button onClick={onAccept} className="btn-primary">接单</button>}
         {isAssigned && order.status === 'in_progress' && (
@@ -665,8 +694,9 @@ function DetailModal({
             <button onClick={onUploadPhotos} className="btn-secondary gap-1">
               <ImagePlus className="w-4 h-4" /> 上传照片
             </button>
-            <button onClick={onSubmitReview} disabled={submitting} className="btn-primary gap-1">
+            <button onClick={onSubmitReview} disabled={submitting || noPhotos} className="btn-primary gap-1 disabled:opacity-50">
               <Send className="w-4 h-4" /> 提交复核
+              {noPhotos && <span className="text-xs ml-1">（需照片）</span>}
             </button>
           </>
         )}

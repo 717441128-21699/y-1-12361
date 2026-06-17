@@ -293,34 +293,26 @@ router.put('/:id/review', authMiddleware, requireRole('owner', 'technician'), as
   }
 })
 
-router.put('/:id/complete', authMiddleware, requireRole('repairman'), async (req: Request, res: Response): Promise<void> => {
+router.put('/:id/upload-photos', authMiddleware, requireRole('repairman', 'technician', 'owner'), async (req: Request, res: Response): Promise<void> => {
   try {
     const order = await db('work_orders').where({ id: req.params.id }).first()
     if (!order) {
       res.status(404).json({ success: false, error: '工单不存在' })
       return
     }
-    if (order.status !== 'accepted' && order.status !== 'in_progress') {
-      res.status(400).json({ success: false, error: '工单状态不允许完成' })
+    if (order.status !== 'in_progress') {
+      res.status(400).json({ success: false, error: '仅进行中的工单可上传照片' })
       return
     }
-    const existingPhotos = await db('repair_photos').where({ work_order_id: order.id })
-    const hasPhotos = existingPhotos.length > 0 || (req.body.photos && Array.isArray(req.body.photos) && req.body.photos.length > 0)
-    if (!hasPhotos) {
-      res.status(400).json({ success: false, error: '请上传至少一张维修配件更换照片后才能完成工单' })
+    if (!req.body.photos || !Array.isArray(req.body.photos) || req.body.photos.length === 0) {
+      res.status(400).json({ success: false, error: '请至少上传一张照片' })
       return
     }
-    await db('work_orders').where({ id: req.params.id }).update({
-      status: 'completed',
-      completed_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
-    })
-    if (req.body.photos && Array.isArray(req.body.photos)) {
-      for (const url of req.body.photos) {
-        await db('repair_photos').insert({
-          work_order_id: Number(req.params.id),
-          photo_url: url,
-        })
-      }
+    for (const url of req.body.photos) {
+      await db('repair_photos').insert({
+        work_order_id: Number(req.params.id),
+        photo_url: url,
+      })
     }
     res.json({ success: true })
   } catch (err: any) {

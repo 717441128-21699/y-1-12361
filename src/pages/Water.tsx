@@ -46,7 +46,7 @@ export default function Water() {
   const [approvalReason, setApprovalReason] = useState('')
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([])
 
-  const [restoreNotification, setRestoreNotification] = useState<ApprovalRecord | null>(null)
+  const [restoreNotifications, setRestoreNotifications] = useState<ApprovalRecord[]>([])
   const [dismissedIds, setDismissedIds] = useState<number[]>([])
 
   const fetchData = useCallback(async () => {
@@ -60,20 +60,16 @@ export default function Water() {
       setApprovalHistory(history || [])
 
       if (isFarmer && history && history.length > 0) {
+        const stored = localStorage.getItem('water_dismissed_approvals')
+        const dismissed = stored ? JSON.parse(stored) : []
+        setDismissedIds(dismissed)
+
         const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000
-        const recentApprovals = (history as ApprovalRecord[]).filter((h) => {
+        const recentUnread = (history as ApprovalRecord[]).filter((h) => {
           const createdAt = new Date(h.createdAt).getTime()
-          return createdAt > twentyFourHoursAgo
+          return createdAt > twentyFourHoursAgo && !dismissed.includes(h.id)
         })
-        if (recentApprovals.length > 0) {
-          const stored = localStorage.getItem('water_dismissed_approvals')
-          const dismissed = stored ? JSON.parse(stored) : []
-          setDismissedIds(dismissed)
-          const unread = recentApprovals.find((h) => !dismissed.includes(h.id))
-          if (unread) {
-            setRestoreNotification(unread)
-          }
-        }
+        setRestoreNotifications(recentUnread)
       }
     } catch {
       setData([])
@@ -89,7 +85,7 @@ export default function Water() {
     const newDismissed = [...dismissedIds, record.id]
     setDismissedIds(newDismissed)
     localStorage.setItem('water_dismissed_approvals', JSON.stringify(newDismissed))
-    setRestoreNotification(null)
+    setRestoreNotifications((prev) => prev.filter((n) => n.id !== record.id))
   }
 
   const totalUsed = data.reduce((s, d) => s + d.monthlyUsed, 0)
@@ -167,26 +163,31 @@ export default function Water() {
 
   return (
     <div className="p-6 space-y-6">
-      {restoreNotification && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
-          <Bell className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
-          <div className="flex-1">
-            <div className="font-medium text-emerald-800 mb-1">灌溉权限已恢复</div>
-            <div className="text-sm text-emerald-700">
-              <span className="font-medium">「{restoreNotification.fieldName}」</span> 的灌溉权限已恢复
+      {restoreNotifications.length > 0 && (
+        <div className="space-y-2">
+          {restoreNotifications.map((rec) => (
+            <div key={rec.id} className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+              <Bell className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <div className="font-medium text-emerald-800 mb-1">灌溉权限已恢复</div>
+                <div className="text-sm text-emerald-700">
+                  <span className="font-medium">「{rec.fieldName}」</span> 的灌溉权限已恢复
+                </div>
+                <div className="text-xs text-emerald-600 mt-1 space-x-4">
+                  <span>审批人：{rec.approverName}</span>
+                  <span>恢复原因：{rec.reason}</span>
+                  <span>恢复前用量：{typeof rec.usedBefore === 'number' ? rec.usedBefore.toFixed(1) : rec.usedBefore} / {rec.quota} m³</span>
+                  <span>{new Date(rec.createdAt).toLocaleString('zh-CN')}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => dismissNotification(rec)}
+                className="text-emerald-500 hover:text-emerald-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="text-xs text-emerald-600 mt-1 space-x-4">
-              <span>审批人：{restoreNotification.approverName}</span>
-              <span>恢复原因：{restoreNotification.reason}</span>
-              <span>{new Date(restoreNotification.createdAt).toLocaleString('zh-CN')}</span>
-            </div>
-          </div>
-          <button
-            onClick={() => dismissNotification(restoreNotification)}
-            className="text-emerald-500 hover:text-emerald-700 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          ))}
         </div>
       )}
 

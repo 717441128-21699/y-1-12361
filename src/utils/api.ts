@@ -200,8 +200,8 @@ export const workorders = {
       body: JSON.stringify({ pass, comment }),
     }),
 
-  complete: (id: number, photos?: string[]) =>
-    request<void>(`/workorders/${id}/complete`, {
+  uploadPhotos: (id: number, photos: string[]) =>
+    request<void>(`/workorders/${id}/upload-photos`, {
       method: 'PUT',
       body: JSON.stringify({ photos }),
     }),

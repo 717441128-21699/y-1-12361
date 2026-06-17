@@ -17,6 +17,7 @@ type StatusFilter = '' | 'normal' | 'fault' | 'offline'
 interface AlertItem {
   id: number
   deviceType: string
+  deviceId: number
   deviceName: string
   fieldId: number
   fieldName: string
@@ -186,53 +187,69 @@ function ValveGrid({ valves, fieldMap, onToggle }: { valves: Valve[]; fieldMap: 
   )
 }
 
-function PumpDashboard({ pumps, fieldMap, onRepair }: {
-  pumps: Pump[]; fieldMap: Record<number, string>; onRepair: (p: Pump) => void
+function PumpDashboard({ pumps, fieldMap, onRepair, onViewOrder, pumpOrders }: {
+  pumps: Pump[]; fieldMap: Record<number, string>;
+  onRepair: (p: Pump) => void; onViewOrder: (o: WorkOrder) => void;
+  pumpOrders: Record<number, WorkOrder | null>
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {pumps.map((p) => (
-        <div key={p.id} className={`card p-5 ${p.status === 'fault' ? 'border-red-200' : ''}`}>
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <h4 className="font-medium text-gray-700">{p.name}</h4>
-              <p className="text-xs text-gray-400 mt-0.5">{fieldMap[p.fieldId] || `田块#${p.fieldId}`}</p>
-            </div>
-            {p.status === 'running' ? (
-              <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-status" />
-                <span className="text-xs font-medium text-emerald-600">运行中</span>
+      {pumps.map((p) => {
+        const relatedOrder = pumpOrders[p.id]
+        return (
+          <div key={p.id} className={`card p-5 ${p.status === 'fault' ? 'border-red-200' : ''}`}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h4 className="font-medium text-gray-700">{p.name}</h4>
+                <p className="text-xs text-gray-400 mt-0.5">{fieldMap[p.fieldId] || `田块#${p.fieldId}`}</p>
               </div>
-            ) : p.status === 'fault' ? (
-              <span className="status-fault flex items-center gap-1"><AlertTriangle className="w-3 h-3" />故障</span>
-            ) : (
-              <span className="status-offline">已停止</span>
+              {p.status === 'running' ? (
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse-status" />
+                  <span className="text-xs font-medium text-emerald-600">运行中</span>
+                </div>
+              ) : p.status === 'fault' ? (
+                <span className="status-fault flex items-center gap-1"><AlertTriangle className="w-3 h-3" />故障</span>
+              ) : (
+                <span className="status-offline">已停止</span>
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">今日运行</span>
+                <span className="font-mono text-gray-800">{p.todayRuntime} h</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-primary-400 rounded-full" style={{ width: `${Math.min((p.todayRuntime / 24) * 100, 100)}%` }} />
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">累计运行</span>
+                <span className="font-mono text-gray-800">{p.totalRuntime} h</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">上次维护</span>
+                <span className="text-gray-700">{p.lastMaintenance || '-'}</span>
+              </div>
+            </div>
+            {p.status === 'fault' && (
+              <div className="mt-4 space-y-2">
+                {relatedOrder ? (
+                  <button onClick={() => onViewOrder(relatedOrder)}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary-50 text-primary-700 hover:bg-primary-100 transition-colors">
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    工单: <OrderStatusBadge status={relatedOrder.status} /> — 查看详情
+                  </button>
+                ) : (
+                  <button onClick={() => onRepair(p)}
+                    className="w-full btn-danger text-xs flex items-center justify-center gap-1">
+                    <Wrench className="w-3.5 h-3.5" />报修
+                  </button>
+                )}
+              </div>
             )}
           </div>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">今日运行</span>
-              <span className="font-mono text-gray-800">{p.todayRuntime} h</span>
-            </div>
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full bg-primary-400 rounded-full" style={{ width: `${Math.min((p.todayRuntime / 24) * 100, 100)}%` }} />
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">累计运行</span>
-              <span className="font-mono text-gray-800">{p.totalRuntime} h</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">上次维护</span>
-              <span className="text-gray-700">{p.lastMaintenance || '-'}</span>
-            </div>
-          </div>
-          {p.status === 'fault' && (
-            <button onClick={() => onRepair(p)} className="mt-4 w-full btn-danger text-xs flex items-center justify-center gap-1">
-              <Wrench className="w-3.5 h-3.5" />报修
-            </button>
-          )}
-        </div>
-      ))}
+        )
+      })}
       {pumps.length === 0 && <div className="col-span-full text-center py-8 text-gray-400">暂无水泵</div>}
     </div>
   )
@@ -418,6 +435,7 @@ export default function Devices() {
   }>({ open: false, deviceType: '', deviceId: '', deviceName: '', fieldId: 0, description: '', urgency: 'high' })
 
   const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const [pumpOrders, setPumpOrders] = useState<Record<number, WorkOrder | null>>({})
 
   const canManage = user?.role === 'technician' || user?.role === 'owner'
 
@@ -426,11 +444,11 @@ export default function Devices() {
     setTimeout(() => setToast(''), 2500)
   }, [])
 
-  const loadRelatedOrders = useCallback(async (alertList: AlertItem[]) => {
+  const loadRelatedOrders = useCallback(async (alertList: AlertItem[], faultPumps: Pump[]) => {
     const alertsWithOrders = await Promise.all(
       alertList.map(async (a) => {
         try {
-          const orders = await orderApi.getByDevice(a.deviceType, Number(a.id))
+          const orders = await orderApi.getByDevice(a.deviceType, a.deviceId)
           if (orders && orders.length > 0) {
             return { ...a, relatedOrder: orders[0] }
           }
@@ -439,6 +457,19 @@ export default function Devices() {
       })
     )
     setAlerts(alertsWithOrders)
+
+    const pumpOrderMap: Record<number, WorkOrder | null> = {}
+    await Promise.all(
+      faultPumps.map(async (p) => {
+        try {
+          const orders = await orderApi.getByDevice('水泵', p.id)
+          pumpOrderMap[p.id] = (orders && orders.length > 0) ? orders[0] : null
+        } catch {
+          pumpOrderMap[p.id] = null
+        }
+      })
+    )
+    setPumpOrders(pumpOrderMap)
   }, [])
 
   const fetchData = useCallback(async () => {
@@ -458,19 +489,20 @@ export default function Devices() {
       setFieldMap(map)
 
       const alertList: AlertItem[] = [
-        ...s.filter((s) => s.status === 'fault').map((s, i) => ({
-          id: 1000 + i, deviceType: '传感器', deviceName: SENSOR_TYPE_LABELS[s.type] || s.type,
+        ...s.filter((s) => s.status === 'fault').map((s) => ({
+          id: s.id, deviceId: s.id, deviceType: '传感器', deviceName: SENSOR_TYPE_LABELS[s.type] || s.type,
           fieldId: s.fieldId, fieldName: map[s.fieldId] || `田块#${s.fieldId}`,
           description: `传感器异常，当前值 ${s.value}${s.unit}`, severity: 'high' as const, time: s.lastUpdate,
         })),
-        ...pumps.filter((p) => p.status === 'fault').map((p, i) => ({
-          id: 2000 + i, deviceType: '水泵', deviceName: p.name,
+        ...p.filter((p) => p.status === 'fault').map((p) => ({
+          id: p.id, deviceId: p.id, deviceType: '水泵', deviceName: p.name,
           fieldId: p.fieldId, fieldName: map[p.fieldId] || `田块#${p.fieldId}`,
           description: `水泵故障，需要维修`, severity: 'high' as const, time: new Date().toISOString(),
         })),
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
 
-      loadRelatedOrders(alertList)
+      const faultPumps = p.filter((p) => p.status === 'fault')
+      loadRelatedOrders(alertList, faultPumps)
     } catch {
       showToast('加载数据失败')
     } finally {
@@ -504,13 +536,18 @@ export default function Devices() {
 
   const openOrderFromAlert = (a: AlertItem) => {
     setOrderForm({
-      open: true, deviceType: a.deviceType, deviceId: String(a.id),
+      open: true, deviceType: a.deviceType, deviceId: String(a.deviceId),
       deviceName: a.deviceName, fieldId: a.fieldId,
       description: a.description, urgency: a.severity === 'high' ? 'high' : a.severity === 'medium' ? 'medium' : 'low',
     })
   }
 
   const openOrderFromPump = (p: Pump) => {
+    const existing = pumpOrders[p.id]
+    if (existing) {
+      handleViewOrder(existing)
+      return
+    }
     setOrderForm({
       open: true, deviceType: '水泵', deviceId: String(p.id), deviceName: p.name,
       fieldId: p.fieldId, description: `${p.name} 故障，需要维修`, urgency: 'high',
@@ -623,7 +660,7 @@ export default function Devices() {
 
       {tab === 'sensors' && <SensorTable sensors={sensors} fieldMap={fieldMap} />}
       {tab === 'valves' && <ValveGrid valves={valves} fieldMap={fieldMap} onToggle={(v) => setConfirmValve(v)} />}
-      {tab === 'pumps' && <PumpDashboard pumps={pumps} fieldMap={fieldMap} onRepair={openOrderFromPump} />}
+      {tab === 'pumps' && <PumpDashboard pumps={pumps} fieldMap={fieldMap} onRepair={openOrderFromPump} onViewOrder={handleViewOrder} pumpOrders={pumpOrders} />}
       {tab === 'alerts' && <AlertList alerts={alerts} onGenerateOrder={openOrderFromAlert} onViewOrder={handleViewOrder} />}
 
       <ConfirmDialog

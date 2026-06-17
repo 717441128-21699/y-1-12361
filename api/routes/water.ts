@@ -96,7 +96,18 @@ router.get('/approval-history', authMiddleware, async (req: Request, res: Respon
       query = query.whereIn('field_id', fieldIds)
     }
     const records = await query
-    res.json({ success: true, data: records })
+    const data = records.map((r: any) => ({
+      id: r.id,
+      fieldId: r.field_id,
+      fieldName: r.field_name,
+      approverId: r.approver_id,
+      approverName: r.approver_name,
+      reason: r.reason,
+      usedBefore: r.used_before,
+      quota: r.quota,
+      createdAt: r.created_at,
+    }))
+    res.json({ success: true, data })
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message })
   }
