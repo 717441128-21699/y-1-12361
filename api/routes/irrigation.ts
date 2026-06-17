@@ -128,4 +128,75 @@ router.get('/recommendations', authMiddleware, async (req: Request, res: Respons
   }
 })
 
+router.post('/plans/adopt-recommendation', authMiddleware, requireRole('owner', 'technician'), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { fieldId, recommendedTime, reason, date } = req.body
+    const targetDate = date || new Date().toISOString().slice(0, 10)
+    const field = await db('fields').where({ id: fieldId }).first()
+    if (!field) {
+      res.status(404).json({ success: false, error: '田块不存在' })
+      return
+    }
+    const existing = await db('irrigation_plans').where({ field_id: fieldId, plan_date: targetDate }).first()
+    if (existing) {
+      res.status(400).json({ success: false, error: '该田块当天已有计划' })
+      return
+    }
+    const valve = await db('valves').where({ field_id: fieldId }).first()
+    if (!valve) {
+      res.status(400).json({ success: false, error: '该田块无可用阀门' })
+      return
+    }
+    const [startStr, endStr] = (recommendedTime || '06:00-08:00').split('-')
+    const waterAmount = Number((field.area * 0.3).toFixed(1))
+    const [id] = await db('irrigation_plans').insert({
+      field_id: fieldId,
+      valve_id: valve.id,
+      plan_date: targetDate,
+      start_time: `${targetDate} ${startStr}:00`,
+      end_time: `${targetDate} ${endStr}:00`,
+      water_amount: waterAmount,
+      status: 'pending',
+      reason: `采纳推荐时段：${reason || recommendedTime}`,
+    })
+    res.json({ success: true, data: { id, fieldId, fieldName: field.name, startTime: `${targetDate} ${startStr}:00` } })
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+router.post('/plans/create', authMiddleware, requireRole('owner', 'technician'), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { fieldId, startTime, endTime, waterAmount, reason } = req.body
+    if (!fieldId || !startTime || !endTime || waterAmount === undefined) {
+      res.status(400).json({ success: false, error: '参数不完整' })
+      return
+    }
+    const planDate = new Date(startTime).toISOString().slice(0, 10)
+    const existing = await db('irrigation_plans').where({ field_id: fieldId, plan_date: planDate }).first()
+    if (existing) {
+      res.status(400).json({ success: false, error: '该田块当天已有计划' })
+      return
+    }
+    const valve = await db('valves').where({ field_id: fieldId }).first()
+    if (!valve) {
+      res.status(400).json({ success: false, error: '该田块无可用阀门' })
+      return
+    }
+    const [id] = await db('irrigation_plans').insert({
+      field_id: fieldId,
+      valve_id: valve.id,
+      plan_date: planDate,
+      start_time: startTime,
+      end_time: endTime,
+      water_amount: waterAmount,
+      status: 'pending',
+      reason,
+    })
+    res.json({ success: true, data: { id } })
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 export default router

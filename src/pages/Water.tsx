@@ -31,19 +31,27 @@ export default function Water() {
   const [editQuota, setEditQuota] = useState(0)
   const [approvalField, setApprovalField] = useState<WaterUsage | null>(null)
   const [approvalReason, setApprovalReason] = useState('')
-  const [approvalHistory, setApprovalHistory] = useState<{ field: string; date: string; reason: string }[]>([])
+  const [approvalHistory, setApprovalHistory] = useState<{
+    id: number; fieldId: number; fieldName: string;
+    approverId: number; approverName: string; reason: string;
+    usedBefore: number; quota: number; createdAt: string;
+  }[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const d = await api.getUsage({ month })
+      const [d, history] = await Promise.all([
+        api.getUsage({ month }),
+        canEdit ? api.approvalHistory().catch(() => []) : Promise.resolve([]),
+      ])
       setData(d)
+      setApprovalHistory(history || [])
     } catch {
       setData([])
     } finally {
       setLoading(false)
     }
-  }, [month])
+  }, [month, canEdit])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -99,15 +107,14 @@ export default function Water() {
 
   const handleApprove = async () => {
     if (!approvalField || !approvalReason) return
-    await api.approve(approvalField.fieldId)
-    setApprovalHistory((prev) => [...prev, {
-      field: approvalField.fieldName,
-      date: new Date().toLocaleDateString('zh-CN'),
-      reason: approvalReason,
-    }])
-    setApprovalField(null)
-    setApprovalReason('')
-    await fetchData()
+    try {
+      await api.approve(approvalField.fieldId, approvalReason)
+      setApprovalField(null)
+      setApprovalReason('')
+      await fetchData()
+    } catch (e: any) {
+      alert(e?.message || '审批失败')
+    }
   }
 
   if (loading) {
@@ -267,11 +274,17 @@ export default function Water() {
             <div className="card">
               <div className="card-header"><h2 className="font-semibold text-gray-700">审批历史</h2></div>
               <div className="card-body space-y-2">
-                {approvalHistory.map((h, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm py-2 border-b border-gray-50 last:border-0">
-                    <span className="font-medium">{h.field}</span>
-                    <span className="text-gray-400">{h.date}</span>
-                    <span className="text-gray-500">{h.reason}</span>
+                {approvalHistory.map((h) => (
+                  <div key={h.id} className="text-sm py-2 border-b border-gray-50 last:border-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium">{h.fieldName}</span>
+                      <span className="text-gray-400 text-xs">{new Date(h.createdAt).toLocaleString('zh-CN')}</span>
+                    </div>
+                    <div className="text-gray-500 text-xs flex flex-wrap gap-x-4 gap-y-0.5">
+                      <span>审批人：{h.approverName}</span>
+                      <span>恢复前用量：{h.usedBefore?.toFixed?.(1) || h.usedBefore} / {h.quota} m³</span>
+                    </div>
+                    <div className="text-gray-600 text-xs mt-1">原因：{h.reason}</div>
                   </div>
                 ))}
               </div>

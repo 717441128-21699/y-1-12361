@@ -64,11 +64,39 @@ router.post('/approve/:fieldId', authMiddleware, requireRole('owner', 'technicia
       res.status(400).json({ success: false, error: '该田块灌溉权限正常，无需恢复' })
       return
     }
+    const { reason } = req.body
+    const usedBefore = field.monthly_used
+    const quota = field.monthly_quota
     await db('fields').where({ id: req.params.fieldId }).update({
       irrigation_suspended: 0,
       monthly_used: 0,
     })
+    await db('approval_records').insert({
+      field_id: field.id,
+      field_name: field.name,
+      approver_id: req.user!.id,
+      approver_name: req.user!.username,
+      reason: reason || '管理员审批恢复',
+      used_before: usedBefore,
+      quota,
+      created_at: db.fn.now(),
+    })
     res.json({ success: true })
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+router.get('/approval-history', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    let query = db('approval_records').orderBy('created_at', 'desc')
+    if (req.user!.role === 'farmer') {
+      const fieldRows = await db('user_fields').where({ user_id: req.user!.id })
+      const fieldIds = fieldRows.map((r: any) => r.field_id)
+      query = query.whereIn('field_id', fieldIds)
+    }
+    const records = await query
+    res.json({ success: true, data: records })
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message })
   }

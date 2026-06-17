@@ -121,6 +121,18 @@ export const irrigation = {
       }
     ),
 
+  adoptRecommendation: (data: { fieldId: number; recommendedTime: string; reason?: string; date?: string }) =>
+    request<{ id: number; fieldId: number; fieldName: string; startTime: string }>(
+      '/irrigation/plans/adopt-recommendation',
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+
+  createPlan: (data: { fieldId: number; startTime: string; endTime: string; waterAmount: number; reason?: string }) =>
+    request<{ id: number }>('/irrigation/plans/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   updatePlan: (id: number, data: Partial<IrrigationPlan>) =>
     request<void>(`/irrigation/plans/${id}`, {
       method: 'PUT',
@@ -177,8 +189,17 @@ export const water = {
       body: JSON.stringify({ monthlyQuota }),
     }),
 
-  approve: (fieldId: number) =>
-    request<void>(`/water/approve/${fieldId}`, { method: 'POST' }),
+  approve: (fieldId: number, reason?: string) =>
+    request<void>(`/water/approve/${fieldId}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
+  approvalHistory: () => request<{
+    id: number; fieldId: number; fieldName: string;
+    approverId: number; approverName: string; reason: string;
+    usedBefore: number; quota: number; createdAt: string;
+  }[]>('/water/approval-history'),
 
   exportReport: (month?: string) => {
     const params = month ? `?month=${month}` : ''

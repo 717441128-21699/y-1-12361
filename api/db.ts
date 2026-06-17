@@ -160,6 +160,18 @@ async function createTables() {
     t.string('value').notNullable()
     t.datetime('updated_at').defaultTo(db.fn.now())
   })
+
+  await db.schema.createTable('approval_records', (t) => {
+    t.increments('id').primary()
+    t.integer('field_id').notNullable().references('id').inTable('fields')
+    t.string('field_name').notNullable()
+    t.integer('approver_id').notNullable().references('id').inTable('users')
+    t.string('approver_name').notNullable()
+    t.string('reason').notNullable()
+    t.float('used_before').notNullable().defaultTo(0)
+    t.float('quota').notNullable().defaultTo(0)
+    t.datetime('created_at').defaultTo(db.fn.now())
+  })
 }
 
 async function seedData() {
@@ -293,17 +305,39 @@ async function seedData() {
 }
 
 export async function initDatabase() {
+  let tablesExist = false
   try {
     const hasUsers = await db('users').count('* as cnt').first()
-    if (Number(hasUsers!.cnt) > 0) {
-      return
+    tablesExist = Number(hasUsers!.cnt) > 0
+    if (!tablesExist) {
+      throw new Error('need to create')
     }
   } catch {
-    // tables don't exist yet, proceed to create
+    await createTables()
+    await seedData()
+    console.log('Database initialized with seed data')
+    return
   }
-  await createTables()
-  await seedData()
-  console.log('Database initialized with seed data')
+
+  try {
+    await db.schema.hasTable('approval_records').then(async (exists) => {
+      if (!exists) {
+        await db.schema.createTable('approval_records', (t) => {
+          t.increments('id').primary()
+          t.integer('field_id').notNullable().references('id').inTable('fields')
+          t.string('field_name').notNullable()
+          t.integer('approver_id').notNullable().references('id').inTable('users')
+          t.string('approver_name').notNullable()
+          t.string('reason').notNullable()
+          t.float('used_before').notNullable().defaultTo(0)
+          t.float('quota').notNullable().defaultTo(0)
+          t.datetime('created_at').defaultTo(db.fn.now())
+        })
+      }
+    })
+  } catch {
+    // ignore migration errors
+  }
 }
 
 export default db

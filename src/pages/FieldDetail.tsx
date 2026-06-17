@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, Trash2, Droplets, Thermometer, Gauge, Waves,
-  ToggleLeft, ToggleRight, AlertTriangle,
+  ToggleLeft, ToggleRight, AlertTriangle, Wrench, X, ClipboardList,
 } from 'lucide-react'
-import { fields as fieldApi, devices as deviceApi } from '@/utils/api'
+import { fields as fieldApi, devices as deviceApi, workorders as orderApi } from '@/utils/api'
 import { useAuthStore } from '@/store/auth'
-import type { FieldDetail, Sensor, Valve, Pump } from '@/types'
+import type { FieldDetail, Sensor, Valve, Pump, Urgency } from '@/types'
 
 const SENSOR_ICONS: Record<string, React.ElementType> = {
   moisture: Droplets,
@@ -102,7 +102,7 @@ function ValveRow({ valve, onToggle, toggling }: { valve: Valve; onToggle: (v: V
   )
 }
 
-function PumpCard({ pump }: { pump: Pump }) {
+function PumpCard({ pump, onRepair }: { pump: Pump; onRepair?: (p: Pump) => void }) {
   return (
     <div className={`card p-4 ${pump.status === 'fault' ? 'border-red-200 bg-red-50/30' : ''}`}>
       <div className="flex items-start justify-between mb-3">
@@ -123,6 +123,11 @@ function PumpCard({ pump }: { pump: Pump }) {
         <div className="text-gray-500">上次维护</div>
         <div className="text-gray-700">{pump.lastMaintenance || '-'}</div>
       </div>
+      {pump.status === 'fault' && onRepair && (
+        <button onClick={() => onRepair(pump)} className="mt-3 w-full btn-danger text-xs flex items-center justify-center gap-1">
+          <Wrench className="w-3.5 h-3.5" />报修
+        </button>
+      )}
     </div>
   )
 }
@@ -138,6 +143,12 @@ export default function FieldDetail() {
   const [tab, setTab] = useState<Tab>('sensors')
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [toast, setToast] = useState('')
+  const [reportForm, setReportForm] = useState<{
+    open: boolean; pump: Pump | null; urgency: Urgency; description: string;
+  }>({ open: false, pump: null, urgency: 'high', description: '' })
+
+  const canEdit = user?.role === 'technician' || user?.role === 'owner'
+  const canReport = canEdit
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -183,7 +194,27 @@ export default function FieldDetail() {
     }
   }
 
-  const canEdit = user?.role === 'technician' || user?.role === 'owner'
+  const openRepair = (p: Pump) => {
+    setReportForm({ open: true, pump: p, urgency: 'high', description: `${p.name} 故障，需要维修` })
+  }
+
+  const submitRepair = async () => {
+    if (!reportForm.pump || !detail) return
+    try {
+      await orderApi.create({
+        type: 'maintenance',
+        deviceType: '水泵',
+        deviceId: reportForm.pump.id,
+        fieldId: detail.id,
+        description: reportForm.description,
+        urgency: reportForm.urgency,
+      })
+      showToast('报修工单已提交')
+      setReportForm({ open: false, pump: null, urgency: 'high', description: '' })
+    } catch (e: any) {
+      showToast(e?.message || '提交失败')
+    }
+  }
 
   if (loading) {
     return (
@@ -284,8 +315,53 @@ export default function FieldDetail() {
 
       {tab === 'pumps' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {detail.pumps.map((p) => <PumpCard key={p.id} pump={p} />)}
+          {detail.pumps.map((p) => <PumpCard key={p.id} pump={p} onRepair={openRepair} />)}
           {detail.pumps.length === 0 && <div className="col-span-full text-center py-8 text-gray-400">暂无水泵</div>}
+        </div>
+      )}
+
+      {reportForm.open && reportForm.pump && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={() => setReportForm((s) => ({ ...s, open: false }))}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-red-500" />水泵报修
+              </h3>
+              <button onClick={() => setReportForm((s) => ({ ...s, open: false }))} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="form-label">水泵名称</label>
+                <input className="form-input" value={reportForm.pump.name} readOnly />
+              </div>
+              <div>
+                <label className="form-label">所属田块</label>
+                <input className="form-input" value={detail?.name || ''} readOnly />
+              </div>
+              <div>
+                <label className="form-label">故障描述</label>
+                <textarea className="form-input" rows={3} value={reportForm.description}
+                  onChange={(e) => setReportForm((s) => ({ ...s, description: e.target.value }))} />
+              </div>
+              <div>
+                <label className="form-label">紧急程度</label>
+                <select className="form-input" value={reportForm.urgency}
+                  onChange={(e) => setReportForm((s) => ({ ...s, urgency: e.target.value as Urgency }))}>
+                  <option value="high">紧急（红色）</option>
+                  <option value="medium">中等（橙色）</option>
+                  <option value="low">低（黄色）</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button className="btn-secondary" onClick={() => setReportForm((s) => ({ ...s, open: false }))}>取消</button>
+              <button className="btn-primary" onClick={submitRepair} disabled={!canReport}>
+                {canReport ? '提交工单' : '无权限'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

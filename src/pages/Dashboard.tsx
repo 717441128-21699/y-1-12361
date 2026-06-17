@@ -9,7 +9,7 @@ import {
   TitleComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { Droplets, Activity, AlertTriangle, Gauge, Download, RefreshCw } from 'lucide-react'
+import { Droplets, Activity, AlertTriangle, Gauge, Download, RefreshCw, X, FileJson } from 'lucide-react'
 import { dashboard as dashboardApi, fields as fieldsApi, water as waterApi } from '@/utils/api'
 import type { DashboardData, Field, WaterUsage } from '@/types'
 
@@ -329,6 +329,7 @@ export default function Dashboard() {
   const [selectedCrop, setSelectedCrop] = useState<string>('all')
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [refreshing, setRefreshing] = useState(false)
+  const [exportModal, setExportModal] = useState<{ open: boolean; data: any; month: string }>({ open: false, data: null, month: '' })
 
   const fetchData = useCallback(async () => {
     try {
@@ -364,11 +365,27 @@ export default function Dashboard() {
   }, [fieldList])
 
   const handleExport = async () => {
+    const month = selectedDate.slice(0, 7)
     try {
-      await waterApi.exportReport(selectedDate.slice(0, 7))
+      const report = await waterApi.exportReport(month)
+      setExportModal({ open: true, data: report, month })
     } catch {
       // silently handle
     }
+  }
+
+  const handleDownload = () => {
+    if (!exportModal.data) return
+    const jsonStr = JSON.stringify(exportModal.data, null, 2)
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `irrigation-report-${exportModal.month}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -499,6 +516,46 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {exportModal.open && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setExportModal((s) => ({ ...s, open: false }))}>
+          <div
+            className="rounded-xl w-full max-w-3xl max-h-[80vh] flex flex-col"
+            style={{ background: CARD_BG, border: `1px solid ${CARD_BORDER}`, boxShadow: TEAL_GLOW }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(0,210,211,0.2)' }}>
+              <div className="flex items-center gap-2">
+                <FileJson className="w-5 h-5" style={{ color: TEAL }} />
+                <h3 className="font-semibold" style={{ color: TEAL }}>月度灌溉报告 · {exportModal.month}</h3>
+              </div>
+              <button onClick={() => setExportModal((s) => ({ ...s, open: false }))} className="text-gray-400 hover:text-gray-200">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <pre
+                className="text-[11px] leading-relaxed rounded p-3 overflow-x-auto"
+                style={{ background: 'rgba(0,0,0,0.3)', color: '#c0d0d0', fontFamily: 'JetBrains Mono, monospace' }}
+              >{JSON.stringify(exportModal.data, null, 2)}</pre>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t" style={{ borderColor: 'rgba(0,210,211,0.2)' }}>
+              <button
+                onClick={() => setExportModal((s) => ({ ...s, open: false }))}
+                className="text-xs px-4 py-2 rounded"
+                style={{ background: 'rgba(255,255,255,0.08)', color: '#c0c0c0', border: '1px solid rgba(255,255,255,0.1)' }}
+              >关闭</button>
+              <button
+                onClick={handleDownload}
+                className="text-xs px-4 py-2 rounded flex items-center gap-1.5"
+                style={{ background: 'rgba(0,210,211,0.2)', color: TEAL, border: `1px solid ${CARD_BORDER}` }}
+              >
+                <Download className="w-3.5 h-3.5" />下载JSON
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin {

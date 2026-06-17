@@ -39,6 +39,12 @@ export default function Irrigation() {
   const [editPlan, setEditPlan] = useState<IrrigationPlan | null>(null)
   const [editForm, setEditForm] = useState({ startTime: '', endTime: '', waterAmount: 0, reason: '' })
   const [generating, setGenerating] = useState(false)
+  const [toast, setToast] = useState('')
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2500)
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -70,8 +76,19 @@ export default function Irrigation() {
   }
 
   const handleAdopt = async (rec: IrrigationRecommendation) => {
-    setRecs((prev) => prev.filter((r) => r.fieldId !== rec.fieldId))
-    await fetchData()
+    try {
+      await api.adoptRecommendation({
+        fieldId: rec.fieldId,
+        recommendedTime: rec.recommendedTime,
+        reason: rec.reason,
+        date,
+      })
+      setRecs((prev) => prev.filter((r) => r.fieldId !== rec.fieldId))
+      showToast(`已采纳「${rec.fieldName}」推荐时段`)
+      await fetchData()
+    } catch (e: any) {
+      showToast(e?.message || '采纳推荐失败')
+    }
   }
 
   const openEdit = (plan: IrrigationPlan) => {
@@ -117,6 +134,11 @@ export default function Irrigation() {
 
   return (
     <div className="p-6 space-y-6">
+      {toast && (
+        <div className="fixed top-20 right-6 z-50 bg-primary-500 text-white px-5 py-3 rounded-lg shadow-lg text-sm">
+          {toast}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Calendar className="w-6 h-6 text-primary" />

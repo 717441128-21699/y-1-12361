@@ -43,6 +43,7 @@ export default function WorkOrders() {
   const [photoUrl, setPhotoUrl] = useState('')
   const [completePhotos, setCompletePhotos] = useState<string[]>([])
   const [lightbox, setLightbox] = useState<string | null>(null)
+  const [toast, setToast] = useState('')
 
   const [createForm, setCreateForm] = useState({
     deviceType: '传感器', deviceId: '', fieldId: 0, description: '', urgency: 'medium' as Urgency,
@@ -84,6 +85,11 @@ export default function WorkOrders() {
 
   const handleComplete = async () => {
     if (!showComplete) return
+    if (completePhotos.length === 0) {
+      setToast('请至少上传一张配件更换照片后才能完成工单')
+      setTimeout(() => setToast(''), 2500)
+      return
+    }
     await workorders.complete(showComplete.id, completePhotos)
     setShowComplete(null)
     setCompletePhotos([])
@@ -92,7 +98,13 @@ export default function WorkOrders() {
   }
 
   const handleCreate = async () => {
+    if (!createForm.fieldId || !createForm.description) {
+      setToast('请填写完整工单信息')
+      setTimeout(() => setToast(''), 2500)
+      return
+    }
     await workorders.create({
+      type: 'maintenance',
       deviceType: createForm.deviceType,
       deviceId: Number(createForm.deviceId),
       fieldId: createForm.fieldId,
@@ -121,6 +133,11 @@ export default function WorkOrders() {
 
   return (
     <div className="p-6 h-full flex flex-col">
+      {toast && (
+        <div className="fixed top-20 right-6 z-50 bg-primary-500 text-white px-5 py-3 rounded-lg shadow-lg text-sm">
+          {toast}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Wrench className="w-6 h-6 text-primary" />

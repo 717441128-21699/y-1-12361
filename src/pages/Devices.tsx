@@ -3,9 +3,11 @@ import {
   Monitor, Droplets, Thermometer, Gauge, Waves,
   ToggleLeft, ToggleRight, AlertTriangle, AlertCircle,
   ArrowUp, ArrowDown, Minus, ClipboardList, RefreshCw,
+  X, Wrench,
 } from 'lucide-react'
-import { devices as deviceApi, fields as fieldApi } from '@/utils/api'
-import type { Sensor, Valve, Pump, Field } from '@/types'
+import { devices as deviceApi, fields as fieldApi, workorders as orderApi } from '@/utils/api'
+import { useAuthStore } from '@/store/auth'
+import type { Sensor, Valve, Pump, Field, Urgency } from '@/types'
 
 type Tab = 'sensors' | 'valves' | 'pumps' | 'alerts'
 type StatusFilter = '' | 'normal' | 'fault' | 'offline'
@@ -154,7 +156,9 @@ function ValveGrid({ valves, fieldMap, onToggle }: { valves: Valve[]; fieldMap: 
   )
 }
 
-function PumpDashboard({ pumps, fieldMap }: { pumps: Pump[]; fieldMap: Record<number, string> }) {
+function PumpDashboard({ pumps, fieldMap, onRepair }: {
+  pumps: Pump[]; fieldMap: Record<number, string>; onRepair: (p: Pump) => void
+}) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {pumps.map((p) => (
@@ -192,6 +196,11 @@ function PumpDashboard({ pumps, fieldMap }: { pumps: Pump[]; fieldMap: Record<nu
               <span className="text-gray-700">{p.lastMaintenance || '-'}</span>
             </div>
           </div>
+          {p.status === 'fault' && (
+            <button onClick={() => onRepair(p)} className="mt-4 w-full btn-danger text-xs flex items-center justify-center gap-1">
+              <Wrench className="w-3.5 h-3.5" />报修
+            </button>
+          )}
         </div>
       ))}
       {pumps.length === 0 && <div className="col-span-full text-center py-8 text-gray-400">暂无水泵</div>}
@@ -231,15 +240,24 @@ function AlertList({ alerts, onGenerateOrder }: { alerts: AlertItem[]; onGenerat
 }
 
 export default function Devices() {
+  const user = useAuthStore((s) => s.user)
   const [sensors, setSensors] = useState<Sensor[]>([])
   const [valves, setValves] = useState<Valve[]>([])
   const [pumps, setPumps] = useState<Pump[]>([])
   const [fieldMap, setFieldMap] = useState<Record<number, string>>({})
+  const [fields, setFields] = useState<Field[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('sensors')
   const [toast, setToast] = useState('')
   const [confirmValve, setConfirmValve] = useState<Valve | null>(null)
   const refreshRef = useRef<ReturnType<typeof setInterval>>()
+
+  const [orderForm, setOrderForm] = useState<{
+    open: boolean; deviceType: string; deviceId: string; deviceName: string;
+    fieldId: number; description: string; urgency: Urgency;
+  }>({ open: false, deviceType: '', deviceId: '', deviceName: '', fieldId: 0, description: '', urgency: 'high' })
+
+  const canManage = user?.role === 'technician' || user?.role === 'owner'
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -257,6 +275,7 @@ export default function Devices() {
       setSensors(s)
       setValves(v)
       setPumps(p)
+      setFields(f)
       const map: Record<number, string> = {}
       f.forEach((field) => { map[field.id] = field.name })
       setFieldMap(map)
@@ -304,8 +323,40 @@ export default function Devices() {
     }
   }
 
-  const handleGenerateOrder = (_alert: AlertItem) => {
-    showToast('工单已生成')
+  const openOrderFromAlert = (a: AlertItem) => {
+    setOrderForm({
+      open: true, deviceType: a.deviceType, deviceId: String(a.id),
+      deviceName: a.deviceName, fieldId: a.fieldId,
+      description: a.description, urgency: a.severity === 'high' ? 'high' : a.severity === 'medium' ? 'medium' : 'low',
+    })
+  }
+
+  const openOrderFromPump = (p: Pump) => {
+    setOrderForm({
+      open: true, deviceType: '水泵', deviceId: String(p.id), deviceName: p.name,
+      fieldId: p.fieldId, description: `${p.name} 故障，需要维修`, urgency: 'high',
+    })
+  }
+
+  const handleSubmitOrder = async () => {
+    if (!orderForm.fieldId || !orderForm.description) {
+      showToast('请填写完整工单信息')
+      return
+    }
+    try {
+      await orderApi.create({
+        type: orderForm.deviceType === '水泵' ? 'maintenance' : 'maintenance',
+        deviceType: orderForm.deviceType,
+        deviceId: Number(orderForm.deviceId),
+        fieldId: orderForm.fieldId,
+        description: orderForm.description,
+        urgency: orderForm.urgency,
+      })
+      showToast('工单已创建，将指派维修人员处理')
+      setOrderForm({ open: false, deviceType: '', deviceId: '', deviceName: '', fieldId: 0, description: '', urgency: 'high' })
+    } catch (e: any) {
+      showToast(e?.message || '创建工单失败')
+    }
   }
 
   const TABS: { key: Tab; label: string }[] = [
@@ -371,8 +422,8 @@ export default function Devices() {
 
       {tab === 'sensors' && <SensorTable sensors={sensors} fieldMap={fieldMap} />}
       {tab === 'valves' && <ValveGrid valves={valves} fieldMap={fieldMap} onToggle={(v) => setConfirmValve(v)} />}
-      {tab === 'pumps' && <PumpDashboard pumps={pumps} fieldMap={fieldMap} />}
-      {tab === 'alerts' && <AlertList alerts={alerts} onGenerateOrder={handleGenerateOrder} />}
+      {tab === 'pumps' && <PumpDashboard pumps={pumps} fieldMap={fieldMap} onRepair={openOrderFromPump} />}
+      {tab === 'alerts' && <AlertList alerts={alerts} onGenerateOrder={openOrderFromAlert} />}
 
       <ConfirmDialog
         open={!!confirmValve}
@@ -380,6 +431,59 @@ export default function Devices() {
         onConfirm={handleToggleValve}
         onCancel={() => setConfirmValve(null)}
       />
+
+      {orderForm.open && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={() => canManage && setOrderForm((s) => ({ ...s, open: false }))}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-primary" />新建维修工单
+              </h3>
+              <button onClick={() => setOrderForm((s) => ({ ...s, open: false }))} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="form-label">设备类型</label>
+                <input className="form-input" value={orderForm.deviceType} readOnly />
+              </div>
+              <div>
+                <label className="form-label">设备名称</label>
+                <input className="form-input" value={orderForm.deviceName} readOnly />
+              </div>
+              <div>
+                <label className="form-label">所属田块</label>
+                <select className="form-input" value={orderForm.fieldId}
+                  onChange={(e) => setOrderForm((s) => ({ ...s, fieldId: Number(e.target.value) }))}>
+                  <option value={0}>选择田块</option>
+                  {fields.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">故障描述</label>
+                <textarea className="form-input" rows={3} value={orderForm.description}
+                  onChange={(e) => setOrderForm((s) => ({ ...s, description: e.target.value }))} />
+              </div>
+              <div>
+                <label className="form-label">紧急程度</label>
+                <select className="form-input" value={orderForm.urgency}
+                  onChange={(e) => setOrderForm((s) => ({ ...s, urgency: e.target.value as Urgency }))}>
+                  <option value="high">紧急（红色）</option>
+                  <option value="medium">中等（橙色）</option>
+                  <option value="low">低（黄色）</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button className="btn-secondary" onClick={() => setOrderForm((s) => ({ ...s, open: false }))}>取消</button>
+              <button className="btn-primary" onClick={handleSubmitOrder} disabled={!canManage}>
+                {canManage ? '提交工单' : '无权限'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
